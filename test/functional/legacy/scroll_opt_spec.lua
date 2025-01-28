@@ -13,7 +13,6 @@ describe('smoothscroll', function()
 
   before_each(function()
     screen = Screen.new(40, 12)
-    screen:attach()
   end)
 
   -- oldtest: Test_CtrlE_CtrlY_stop_at_end()
@@ -373,6 +372,108 @@ describe('smoothscroll', function()
     screen:expect_unchanged()
     feed('<C-E>')
     screen:expect_unchanged()
+  end)
+
+  -- oldtest: Test_smoothscroll_diff_change_line()
+  it('works in diff mode when changing line', function()
+    screen:try_resize(55, 20)
+    exec([[
+      set diffopt+=followwrap smoothscroll
+      call setline(1, repeat(' abc', &columns))
+      call setline(2, 'bar')
+      call setline(3, repeat(' abc', &columns))
+      vnew
+      call setline(1, repeat(' abc', &columns))
+      call setline(2, 'foo')
+      call setline(3, 'bar')
+      call setline(4, repeat(' abc', &columns))
+      windo exe "normal! 2gg5\<C-E>"
+      windo diffthis
+    ]])
+
+    screen:expect([[
+      {1:<<<}bc abc abc abc abc abc a│{1:<<<}bc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc     │{7:  } abc abc abc abc abc     |
+      {7:  }{22:foo                      }│{7:  }{23:-------------------------}|
+      {7:  }bar                      │{7:  }^bar                      |
+      {7:  } abc abc abc abc abc abc │{7:  } abc abc abc abc abc abc |
+      {7:  }abc abc abc abc abc abc a│{7:  }abc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc abc │{7:  } abc abc abc abc abc abc |
+      {7:  }abc abc abc abc abc abc a│{7:  }abc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc     │{7:  } abc abc abc abc abc     |
+      {1:~                          }│{1:~                          }|*3
+      {2:[No Name] [+]               }{3:[No Name] [+]              }|
+                                                             |
+    ]])
+    feed('Abar')
+    screen:expect([[
+      {1:<<<}bc abc abc abc abc abc a│{1:<<<}bc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc     │{7:  } abc abc abc abc abc     |
+      {7:  }{22:foo                      }│{7:  }{23:-------------------------}|
+      {7:  }bar                      │{7:  }barbar^                   |
+      {7:  } abc abc abc abc abc abc │{7:  } abc abc abc abc abc abc |
+      {7:  }abc abc abc abc abc abc a│{7:  }abc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc abc │{7:  } abc abc abc abc abc abc |
+      {7:  }abc abc abc abc abc abc a│{7:  }abc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc     │{7:  } abc abc abc abc abc     |
+      {1:~                          }│{1:~                          }|*3
+      {2:[No Name] [+]               }{3:[No Name] [+]              }|
+      {5:-- INSERT --}                                           |
+    ]])
+    feed('<Esc>')
+    screen:expect([[
+      {1:<<<}bc abc abc abc abc abc a│{1:<<<}bc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc     │{7:  } abc abc abc abc abc     |
+      {7:  }{27:foo}{4:                      }│{7:  }{27:barba^r}{4:                   }|
+      {7:  }{22:bar                      }│{7:  }{23:-------------------------}|
+      {7:  } abc abc abc abc abc abc │{7:  } abc abc abc abc abc abc |
+      {7:  }abc abc abc abc abc abc a│{7:  }abc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc abc │{7:  } abc abc abc abc abc abc |
+      {7:  }abc abc abc abc abc abc a│{7:  }abc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc     │{7:  } abc abc abc abc abc     |
+      {1:~                          }│{1:~                          }|*3
+      {2:[No Name] [+]               }{3:[No Name] [+]              }|
+                                                             |
+    ]])
+    feed('yyp')
+    screen:expect([[
+      {1:<<<}bc abc abc abc abc abc a│{1:<<<}bc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc     │{7:  } abc abc abc abc abc     |
+      {7:  }{27:foo}{4:                      }│{7:  }{27:barbar}{4:                   }|
+      {7:  }{4:bar                      }│{7:  }{4:^bar}{27:bar}{4:                   }|
+      {7:  } abc abc abc abc abc abc │{7:  } abc abc abc abc abc abc |
+      {7:  }abc abc abc abc abc abc a│{7:  }abc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc abc │{7:  } abc abc abc abc abc abc |
+      {7:  }abc abc abc abc abc abc a│{7:  }abc abc abc abc abc abc a|
+      {7:  }bc abc abc abc abc abc ab│{7:  }bc abc abc abc abc abc ab|
+      {7:  }c abc abc abc abc abc abc│{7:  }c abc abc abc abc abc abc|
+      {7:  } abc abc abc abc abc     │{7:  } abc abc abc abc abc     |
+      {1:~                          }│{1:~                          }|*3
+      {2:[No Name] [+]               }{3:[No Name] [+]              }|
+                                                             |
+    ]])
   end)
 
   -- oldtest: Test_smoothscroll_wrap_scrolloff_zero()
@@ -1195,6 +1296,91 @@ describe('smoothscroll', function()
       {8:  3 }2F924;CJK COMPATIBILITY IDEOGRAPH-2F|
       {8:    }924;Lo;0;L;7280;;;;N;;;;;           |
                                               |
+    ]])
+  end)
+
+  it('works with very long line and scrolloff', function()
+    screen:try_resize(40, 8)
+    exec([[
+      set smoothscroll scrolloff=3
+      call setline(1, ['one', 'two long '->repeat(100), 'three', 'four', 'five', 'six'])
+    ]])
+    feed(':norm j721|<CR>')
+    screen:expect([[
+      {1:<<<}two long two long two long two long t|
+      wo long two long two long two long two l|
+      ong two long two long two long two long |
+      ^two long two long two long two long two |
+      long two long two long two long two long|
+       two long two long two long two long two|
+       long two long two long two long two lon|
+      :norm j721|                             |
+    ]])
+    feed('gj')
+    screen:expect([[
+      {1:<<<}two long two long two long two long t|
+      wo long two long two long two long two l|
+      ong two long two long two long two long |
+      two long two long two long two long two |
+      ^long two long two long two long two long|
+       two long two long two long two long two|
+       long two long two long two long two lon|
+      :norm j721|                             |
+    ]])
+    feed('gj')
+    screen:expect([[
+      {1:<<<}long two long two long two long two l|
+      ong two long two long two long two long |
+      two long two long two long two long two |
+      long two long two long two long two long|
+      ^ two long two long two long two long two|
+       long two long two long two long two lon|
+      g two long two long                     |
+      :norm j721|                             |
+    ]])
+    feed('gj')
+    screen:expect([[
+      {1:<<<}long two long two long two long two l|
+      ong two long two long two long two long |
+      two long two long two long two long two |
+      long two long two long two long two long|
+       two long two long two long two long two|
+      ^ long two long two long two long two lon|
+      g two long two long                     |
+      :norm j721|                             |
+    ]])
+    feed('gj')
+    screen:expect([[
+      {1:<<<}long two long two long two long two l|
+      ong two long two long two long two long |
+      two long two long two long two long two |
+      long two long two long two long two long|
+       two long two long two long two long two|
+       long two long two long two long two lon|
+      ^g two long two long                     |
+      :norm j721|                             |
+    ]])
+    feed('gj')
+    screen:expect([[
+      {1:<<<} long two long two long two long two |
+      long two long two long two long two long|
+       two long two long two long two long two|
+       long two long two long two long two lon|
+      g two long two long                     |
+      ^three                                   |
+      four                                    |
+      :norm j721|                             |
+    ]])
+    feed('gk')
+    screen:expect([[
+      {1:<<<}long two long two long two long two l|
+      ong two long two long two long two long |
+      two long two long two long two long two |
+      long two long two long two long two long|
+       two long two long two long two long two|
+       long two long two long two long two lon|
+      ^g two long two long                     |
+      :norm j721|                             |
     ]])
   end)
 end)

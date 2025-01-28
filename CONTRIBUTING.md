@@ -42,10 +42,10 @@ Developer guidelines
   make distclean
   make  # Nvim build system uses ninja automatically, if available.
   ```
-- Install `ccache` for faster rebuilds of Nvim. Nvim will use it automatically
-  if it's found. To disable caching use:
+- Install `ccache` or `sccache` for faster rebuilds of Nvim. Nvim will use one
+  of these automatically if it's found. To disable caching use:
   ```bash
-  CCACHE_DISABLE=true make
+  cmake -B build -D CACHE_PRG=OFF
   ```
 
 Pull requests (PRs)
@@ -83,7 +83,7 @@ a comment.
 ### Commit messages
 
 Follow the [conventional commits guidelines][conventional_commits] to *make reviews easier* and to make
-the VCS/git logs more valuable. The structure of a commit message is:
+the VCS/git logs more valuable (try `make lintcommit`). The structure of a commit message is:
 
     type(scope): subject
 
@@ -113,11 +113,6 @@ the VCS/git logs more valuable. The structure of a commit message is:
 
   BREAKING CHANGE: refactor to use Python 3 features since Python 2 is no longer supported.
   ```
-
-### News
-
-High level release notes are maintained in [news.txt](runtime/doc/news.txt). A PR is not required to add a news item
-but is generally recommended.
 
 ### Automated builds (CI)
 
