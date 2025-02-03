@@ -85,7 +85,7 @@ describe('API/win', function()
           [[
            local cmdwin_buf = vim.api.nvim_get_current_buf()
            local new_win, new_buf = ...
-           vim.api.nvim_buf_call(new_buf, function()
+           vim._with({buf = new_buf}, function()
              vim.api.nvim_win_set_buf(new_win, cmdwin_buf)
            end)
          ]],
@@ -100,7 +100,7 @@ describe('API/win', function()
           [[
            local cmdwin_win = vim.api.nvim_get_current_win()
            local new_win, new_buf = ...
-           vim.api.nvim_win_call(new_win, function()
+           vim._with({win = new_win}, function()
              vim.api.nvim_win_set_buf(cmdwin_win, new_buf)
            end)
          ]],
@@ -164,18 +164,12 @@ describe('API/win', function()
       eq('typing\n  some dumb text', curbuf_contents())
     end)
 
-    it('does not leak memory when using invalid window ID with invalid pos', function()
+    it('no memory leak when using invalid window ID with invalid pos', function()
       eq('Invalid window id: 1', pcall_err(api.nvim_win_set_cursor, 1, { 'b\na' }))
     end)
 
     it('updates the screen, and also when the window is unfocused', function()
       local screen = Screen.new(30, 9)
-      screen:set_default_attr_ids({
-        [1] = { bold = true, foreground = Screen.colors.Blue },
-        [2] = { bold = true, reverse = true },
-        [3] = { reverse = true },
-      })
-      screen:attach()
 
       insert('prologue')
       feed('100o<esc>')
@@ -221,10 +215,10 @@ describe('API/win', function()
         grid = [[
         ^                              |
         {1:~                             }|*2
-        {2:[No Name]                     }|
+        {3:[No Name]                     }|
         prologue                      |
                                       |*2
-        {3:[No Name] [+]                 }|
+        {2:[No Name] [+]                 }|
                                       |
       ]],
       }
@@ -235,10 +229,10 @@ describe('API/win', function()
         grid = [[
         ^                              |
         {1:~                             }|*2
-        {2:[No Name]                     }|
+        {3:[No Name]                     }|
                                       |*2
         epilogue                      |
-        {3:[No Name] [+]                 }|
+        {2:[No Name] [+]                 }|
                                       |
       ]],
       }
@@ -249,10 +243,10 @@ describe('API/win', function()
         grid = [[
         ^                              |
         {1:~                             }|*2
-        {2:[No Name]                     }|
+        {3:[No Name]                     }|
         prologue                      |
                                       |*2
-        {3:[No Name] [+]                 }|
+        {2:[No Name] [+]                 }|
                                       |
       ]],
       }
@@ -286,13 +280,6 @@ describe('API/win', function()
 
     it('updates cursorline and statusline ruler in non-current window', function()
       local screen = Screen.new(60, 8)
-      screen:set_default_attr_ids({
-        [1] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
-        [2] = { background = Screen.colors.Grey90 }, -- CursorLine
-        [3] = { bold = true, reverse = true }, -- StatusLine
-        [4] = { reverse = true }, -- StatusLineNC
-      })
-      screen:attach()
       command('set ruler')
       command('set cursorline')
       insert([[
@@ -306,32 +293,25 @@ describe('API/win', function()
         aaa                           │aaa                          |
         bbb                           │bbb                          |
         ccc                           │ccc                          |
-        {2:dd^d                           }│{2:ddd                          }|
+        {21:dd^d                           }│{21:ddd                          }|
         {1:~                             }│{1:~                            }|*2
-        {3:[No Name] [+]  4,3         All }{4:[No Name] [+]  4,3        All}|
+        {3:[No Name] [+]  4,3         All }{2:[No Name] [+]  4,3        All}|
                                                                     |
       ]])
       api.nvim_win_set_cursor(oldwin, { 1, 0 })
       screen:expect([[
-        aaa                           │{2:aaa                          }|
+        aaa                           │{21:aaa                          }|
         bbb                           │bbb                          |
         ccc                           │ccc                          |
-        {2:dd^d                           }│ddd                          |
+        {21:dd^d                           }│ddd                          |
         {1:~                             }│{1:~                            }|*2
-        {3:[No Name] [+]  4,3         All }{4:[No Name] [+]  1,1        All}|
+        {3:[No Name] [+]  4,3         All }{2:[No Name] [+]  1,1        All}|
                                                                     |
       ]])
     end)
 
     it('updates cursorcolumn in non-current window', function()
       local screen = Screen.new(60, 8)
-      screen:set_default_attr_ids({
-        [1] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
-        [2] = { background = Screen.colors.Grey90 }, -- CursorColumn
-        [3] = { bold = true, reverse = true }, -- StatusLine
-        [4] = { reverse = true }, -- StatusLineNC
-      })
-      screen:attach()
       command('set cursorcolumn')
       insert([[
         aaa
@@ -341,22 +321,22 @@ describe('API/win', function()
       local oldwin = curwin()
       command('vsplit')
       screen:expect([[
-        aa{2:a}                           │aa{2:a}                          |
-        bb{2:b}                           │bb{2:b}                          |
-        cc{2:c}                           │cc{2:c}                          |
+        aa{21:a}                           │aa{21:a}                          |
+        bb{21:b}                           │bb{21:b}                          |
+        cc{21:c}                           │cc{21:c}                          |
         dd^d                           │ddd                          |
         {1:~                             }│{1:~                            }|*2
-        {3:[No Name] [+]                  }{4:[No Name] [+]                }|
+        {3:[No Name] [+]                  }{2:[No Name] [+]                }|
                                                                     |
       ]])
       api.nvim_win_set_cursor(oldwin, { 2, 0 })
       screen:expect([[
-        aa{2:a}                           │{2:a}aa                          |
-        bb{2:b}                           │bbb                          |
-        cc{2:c}                           │{2:c}cc                          |
-        dd^d                           │{2:d}dd                          |
+        aa{21:a}                           │{21:a}aa                          |
+        bb{21:b}                           │bbb                          |
+        cc{21:c}                           │{21:c}cc                          |
+        dd^d                           │{21:d}dd                          |
         {1:~                             }│{1:~                            }|*2
-        {3:[No Name] [+]                  }{4:[No Name] [+]                }|
+        {3:[No Name] [+]                  }{2:[No Name] [+]                }|
                                                                     |
       ]])
     end)
@@ -377,6 +357,15 @@ describe('API/win', function()
       )
       api.nvim_win_set_height(api.nvim_list_wins()[2], 2)
       eq(2, api.nvim_win_get_height(api.nvim_list_wins()[2]))
+    end)
+
+    it('failure modes', function()
+      command('split')
+      eq('Invalid window id: 999999', pcall_err(api.nvim_win_set_height, 999999, 10))
+      eq(
+        'Wrong type for argument 2 when calling nvim_win_set_height, expecting Integer',
+        pcall_err(api.nvim_win_set_height, 0, 0.9)
+      )
     end)
 
     it('correctly handles height=1', function()
@@ -427,6 +416,15 @@ describe('API/win', function()
       )
       api.nvim_win_set_width(api.nvim_list_wins()[2], 2)
       eq(2, api.nvim_win_get_width(api.nvim_list_wins()[2]))
+    end)
+
+    it('failure modes', function()
+      command('vsplit')
+      eq('Invalid window id: 999999', pcall_err(api.nvim_win_set_width, 999999, 10))
+      eq(
+        'Wrong type for argument 2 when calling nvim_win_set_width, expecting Integer',
+        pcall_err(api.nvim_win_set_width, 0, 0.9)
+      )
     end)
 
     it('do not cause ml_get errors with foldmethod=expr #19989', function()
@@ -506,6 +504,48 @@ describe('API/win', function()
       command('wincmd j')
       eq('window-status', api.nvim_get_option_value('statusline', { win = win1 }))
       assert_alive()
+    end)
+
+    describe('after closing', function()
+      local buf, win0, win1, win2
+
+      before_each(function()
+        win0 = api.nvim_get_current_win()
+        command('new')
+        buf = api.nvim_get_current_buf()
+        win1 = api.nvim_get_current_win()
+        command('set numberwidth=10')
+        command('split')
+        win2 = api.nvim_get_current_win()
+        command('set numberwidth=15')
+        command('enew')
+        api.nvim_set_current_win(win1)
+        command('normal ix')
+        command('enew')
+        api.nvim_set_current_win(win0)
+        eq(4, api.nvim_get_option_value('numberwidth', {}))
+      end)
+
+      -- at this point buffer `buf` is current in no windows. Closing shouldn't affect its defaults
+      it('0 windows', function()
+        api.nvim_set_current_buf(buf)
+        eq(10, api.nvim_get_option_value('numberwidth', {}))
+      end)
+
+      it('1 window', function()
+        api.nvim_win_close(win1, false)
+
+        api.nvim_set_current_buf(buf)
+        eq(10, api.nvim_get_option_value('numberwidth', {}))
+      end)
+
+      it('2 windows', function()
+        api.nvim_win_close(win1, false)
+        api.nvim_win_close(win2, false)
+
+        api.nvim_set_current_buf(buf)
+        eq(10, api.nvim_get_option_value('numberwidth', {}))
+      end)
     end)
 
     it('returns values for unset local options', function()
@@ -655,7 +695,7 @@ describe('API/win', function()
       feed('q:')
       exec_lua(
         [[
-        vim.api.nvim_win_call(..., function()
+        vim._with({win = ...}, function()
           vim.api.nvim_win_close(0, true)
         end)
       ]],
@@ -674,7 +714,7 @@ describe('API/win', function()
       exec_lua(
         [[
         local otherwin, cmdwin = ...
-        vim.api.nvim_win_call(otherwin, function()
+        vim._with({win = otherwin}, function()
           vim.api.nvim_win_close(cmdwin, true)
         end)
       ]],
@@ -788,7 +828,7 @@ describe('API/win', function()
       })
       exec_lua(
         [[
-        vim.api.nvim_win_call(..., function()
+        vim._with({win = ...}, function()
           vim.api.nvim_win_hide(0)
         end)
       ]],
@@ -807,7 +847,7 @@ describe('API/win', function()
       exec_lua(
         [[
         local otherwin, cmdwin = ...
-        vim.api.nvim_win_call(otherwin, function()
+        vim._with({win = otherwin}, function()
           vim.api.nvim_win_hide(cmdwin)
         end)
       ]],
@@ -874,23 +914,6 @@ describe('API/win', function()
     it('with two diff windows', function()
       local X = api.nvim_get_vvar('maxcol')
       local screen = Screen.new(45, 22)
-      screen:set_default_attr_ids({
-        [0] = { foreground = Screen.colors.Blue1, bold = true },
-        [1] = { foreground = Screen.colors.Blue4, background = Screen.colors.Grey },
-        [2] = { foreground = Screen.colors.Brown },
-        [3] = {
-          foreground = Screen.colors.Blue1,
-          background = Screen.colors.LightCyan1,
-          bold = true,
-        },
-        [4] = { background = Screen.colors.LightBlue },
-        [5] = { foreground = Screen.colors.Blue4, background = Screen.colors.LightGrey },
-        [6] = { background = Screen.colors.Plum1 },
-        [7] = { background = Screen.colors.Red, bold = true },
-        [8] = { reverse = true },
-        [9] = { bold = true, reverse = true },
-      })
-      screen:attach()
       exec([[
         set diffopt+=context:2 number
         let expr = 'printf("%08d", v:val) .. repeat("!", v:val)'
@@ -902,35 +925,35 @@ describe('API/win', function()
       feed('24gg')
       screen:expect {
         grid = [[
-        {1:  }{2:    }{3:----------------}│{1:  }{2:  1 }{4:00000001!       }|
-        {1:  }{2:    }{3:----------------}│{1:  }{2:  2 }{4:00000002!!      }|
-        {1:  }{2:  1 }00000003!!!     │{1:  }{2:  3 }00000003!!!     |
-        {1:  }{2:  2 }00000004!!!!    │{1:  }{2:  4 }00000004!!!!    |
-        {1:+ }{2:  3 }{5:+-- 14 lines: 00}│{1:+ }{2:  5 }{5:+-- 14 lines: 00}|
-        {1:  }{2: 17 }00000019!!!!!!!!│{1:  }{2: 19 }00000019!!!!!!!!|
-        {1:  }{2: 18 }00000020!!!!!!!!│{1:  }{2: 20 }00000020!!!!!!!!|
-        {1:  }{2:    }{3:----------------}│{1:  }{2: 21 }{4:00000025!!!!!!!!}|
-        {1:  }{2:    }{3:----------------}│{1:  }{2: 22 }{4:00000026!!!!!!!!}|
-        {1:  }{2:    }{3:----------------}│{1:  }{2: 23 }{4:00000027!!!!!!!!}|
-        {1:  }{2: 19 }00000028!!!!!!!!│{1:  }{2: 24 }^00000028!!!!!!!!|
-        {1:  }{2: 20 }00000029!!!!!!!!│{1:  }{2: 25 }00000029!!!!!!!!|
-        {1:+ }{2: 21 }{5:+-- 14 lines: 00}│{1:+ }{2: 26 }{5:+-- 14 lines: 00}|
-        {1:  }{2: 35 }00000044!!!!!!!!│{1:  }{2: 40 }00000044!!!!!!!!|
-        {1:  }{2: 36 }00000045!!!!!!!!│{1:  }{2: 41 }00000045!!!!!!!!|
-        {1:  }{2: 37 }{4:00000046!!!!!!!!}│{1:  }{2:    }{3:----------------}|
-        {1:  }{2: 38 }{4:00000047!!!!!!!!}│{1:  }{2:    }{3:----------------}|
-        {1:  }{2: 39 }{4:00000048!!!!!!!!}│{1:  }{2:    }{3:----------------}|
-        {1:  }{2: 40 }{4:00000049!!!!!!!!}│{1:  }{2:    }{3:----------------}|
-        {1:  }{2: 41 }{4:00000050!!!!!!!!}│{1:  }{2:    }{3:----------------}|
-        {8:[No Name] [+]          }{9:[No Name] [+]         }|
+        {7:  }{8:    }{23:----------------}│{7:  }{8:  1 }{22:00000001!       }|
+        {7:  }{8:    }{23:----------------}│{7:  }{8:  2 }{22:00000002!!      }|
+        {7:  }{8:  1 }00000003!!!     │{7:  }{8:  3 }00000003!!!     |
+        {7:  }{8:  2 }00000004!!!!    │{7:  }{8:  4 }00000004!!!!    |
+        {7:+ }{8:  3 }{13:+-- 14 lines: 00}│{7:+ }{8:  5 }{13:+-- 14 lines: 00}|
+        {7:  }{8: 17 }00000019!!!!!!!!│{7:  }{8: 19 }00000019!!!!!!!!|
+        {7:  }{8: 18 }00000020!!!!!!!!│{7:  }{8: 20 }00000020!!!!!!!!|
+        {7:  }{8:    }{23:----------------}│{7:  }{8: 21 }{22:00000025!!!!!!!!}|
+        {7:  }{8:    }{23:----------------}│{7:  }{8: 22 }{22:00000026!!!!!!!!}|
+        {7:  }{8:    }{23:----------------}│{7:  }{8: 23 }{22:00000027!!!!!!!!}|
+        {7:  }{8: 19 }00000028!!!!!!!!│{7:  }{8: 24 }^00000028!!!!!!!!|
+        {7:  }{8: 20 }00000029!!!!!!!!│{7:  }{8: 25 }00000029!!!!!!!!|
+        {7:+ }{8: 21 }{13:+-- 14 lines: 00}│{7:+ }{8: 26 }{13:+-- 14 lines: 00}|
+        {7:  }{8: 35 }00000044!!!!!!!!│{7:  }{8: 40 }00000044!!!!!!!!|
+        {7:  }{8: 36 }00000045!!!!!!!!│{7:  }{8: 41 }00000045!!!!!!!!|
+        {7:  }{8: 37 }{22:00000046!!!!!!!!}│{7:  }{8:    }{23:----------------}|
+        {7:  }{8: 38 }{22:00000047!!!!!!!!}│{7:  }{8:    }{23:----------------}|
+        {7:  }{8: 39 }{22:00000048!!!!!!!!}│{7:  }{8:    }{23:----------------}|
+        {7:  }{8: 40 }{22:00000049!!!!!!!!}│{7:  }{8:    }{23:----------------}|
+        {7:  }{8: 41 }{22:00000050!!!!!!!!}│{7:  }{8:    }{23:----------------}|
+        {2:[No Name] [+]          }{3:[No Name] [+]         }|
                                                      |
       ]],
       }
       screen:try_resize(45, 3)
       screen:expect {
         grid = [[
-        {1:  }{2: 19 }00000028!!!!!!!!│{1:  }{2: 24 }^00000028!!!!!!!!|
-        {8:[No Name] [+]          }{9:[No Name] [+]         }|
+        {7:  }{8: 19 }00000028!!!!!!!!│{7:  }{8: 24 }^00000028!!!!!!!!|
+        {2:[No Name] [+]          }{3:[No Name] [+]         }|
                                                      |
       ]],
       }
@@ -1008,12 +1031,6 @@ describe('API/win', function()
     it('with wrapped lines', function()
       local X = api.nvim_get_vvar('maxcol')
       local screen = Screen.new(45, 22)
-      screen:set_default_attr_ids({
-        [0] = { foreground = Screen.colors.Blue1, bold = true },
-        [1] = { foreground = Screen.colors.Brown },
-        [2] = { background = Screen.colors.Yellow },
-      })
-      screen:attach()
       exec([[
         set number cpoptions+=n
         call setline(1, repeat([repeat('foobar-', 36)], 3))
@@ -1035,26 +1052,26 @@ describe('API/win', function()
       )
       screen:expect {
         grid = [[
-        {1:  1 }^foobar-foobar-foobar-foobar-foobar-foobar|
+        {8:  1 }^foobar-foobar-foobar-foobar-foobar-foobar|
         -foobar-foobar-foobar-foobar-foobar-foobar-fo|
         obar-foobar-foobar-foobar-foobar-foobar-fooba|
         r-foobar-foobar-foobar-foobar-foobar-foobar-f|
         oobar-foobar-foobar-foobar-foobar-foobar-foob|
         ar-foobar-foobar-foobar-foobar-              |
-        {1:  2 }foobar-foobar-foobar-foobar-foobar-foobar|
+        {8:  2 }foobar-foobar-foobar-foobar-foobar-foobar|
         -foobar-foobar-foobar-foobar-foobar-foobar-fo|
-        obar-foobar-fo{2:???????????????}obar-foobar-foob|
+        obar-foobar-fo{10:???????????????}obar-foobar-foob|
         ar-foobar-foobar-foobar-foobar-foobar-foobar-|
         foobar-foobar-foobar-foobar-foobar-foobar-foo|
         bar-foobar-foobar-foobar-foobar-foobar-foobar|
         -                                            |
-        {1:  3 }foobar-foobar-foobar-foobar-foobar-foobar|
+        {8:  3 }foobar-foobar-foobar-foobar-foobar-foobar|
         -foobar-foobar-foobar-foobar-foobar-foobar-fo|
         obar-foobar-foobar-foobar-foobar-foobar-fooba|
         r-foobar-foobar-foobar-foobar-foobar-foobar-f|
-        oobar-foobar-foobar-foob{2:!!!!!!!!!!!!!!!!!!!!!}|
-        {2:!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!}|
-        {2:!!!!!!!!!}ar-foobar-foobar-foobar-foobar-fooba|
+        oobar-foobar-foobar-foob{10:!!!!!!!!!!!!!!!!!!!!!}|
+        {10:!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!}|
+        {10:!!!!!!!!!}ar-foobar-foobar-foobar-foobar-fooba|
         r-foobar-foobar-                             |
                                                      |
       ]],
@@ -1062,7 +1079,7 @@ describe('API/win', function()
       screen:try_resize(45, 2)
       screen:expect {
         grid = [[
-        {1:  1 }^foobar-foobar-foobar-foobar-foobar-foobar|
+        {8:  1 }^foobar-foobar-foobar-foobar-foobar-foobar|
                                                      |
       ]],
       }
@@ -1216,7 +1233,7 @@ describe('API/win', function()
           exec_lua,
           [[
            local cmdwin_buf = vim.api.nvim_get_current_buf()
-           vim.api.nvim_buf_call(vim.api.nvim_create_buf(false, true), function()
+           vim._with({buf = vim.api.nvim_create_buf(false, true)}, function()
              vim.api.nvim_open_win(cmdwin_buf, false, {
                relative='editor', row=5, col=5, width=5, height=5,
              })
@@ -1707,7 +1724,7 @@ describe('API/win', function()
         autocmd BufWinEnter * ++once let fired = v:true
       ]])
       eq(
-        'Failed to set buffer 2',
+        'Vim:E37: No write since last change (add ! to override)',
         pcall_err(api.nvim_open_win, api.nvim_create_buf(true, true), false, { split = 'left' })
       )
       eq(false, eval('fired'))
@@ -1846,6 +1863,38 @@ describe('API/win', function()
         )
         eq(topdir .. '/Xacd', fn.getcwd())
       end)
+    end)
+
+    it('no memory leak with valid title and invalid footer', function()
+      eq(
+        'title/footer must be string or array',
+        pcall_err(api.nvim_open_win, 0, false, {
+          relative = 'editor',
+          row = 10,
+          col = 10,
+          height = 10,
+          width = 10,
+          border = 'single',
+          title = { { 'TITLE' } },
+          footer = 0,
+        })
+      )
+    end)
+
+    it('no memory leak with invalid title and valid footer', function()
+      eq(
+        'title/footer must be string or array',
+        pcall_err(api.nvim_open_win, 0, false, {
+          relative = 'editor',
+          row = 10,
+          col = 10,
+          height = 10,
+          width = 10,
+          border = 'single',
+          title = 0,
+          footer = { { 'FOOTER' } },
+        })
+      )
     end)
   end)
 
@@ -2563,11 +2612,6 @@ describe('API/win', function()
 
     it('updates statusline when moving bottom split', function()
       local screen = Screen.new(10, 10)
-      screen:set_default_attr_ids({
-        [0] = { bold = true, foreground = Screen.colors.Blue }, -- NonText
-        [1] = { bold = true, reverse = true }, -- StatusLine
-      })
-      screen:attach()
       exec([[
         set laststatus=0
         belowright split
@@ -2575,10 +2619,10 @@ describe('API/win', function()
       ]])
       screen:expect([[
         ^            |
-        {0:~           }|*3
-        {1:[No Name]   }|
+        {1:~           }|*3
+        {3:[No Name]   }|
                     |
-        {0:~           }|*3
+        {1:~           }|*3
                     |
       ]])
     end)
@@ -2807,43 +2851,11 @@ describe('API/win', function()
         border = 'single',
       })
       eq(
-        'title/footer cannot be an empty array',
-        pcall_err(api.nvim_win_set_config, win, { title = {} })
+        'title/footer must be string or array',
+        pcall_err(api.nvim_win_set_config, win, { title = 0 })
       )
       command('redraw!')
       assert_alive()
-    end)
-
-    it('no crash with invalid footer', function()
-      local win = api.nvim_open_win(0, true, {
-        width = 10,
-        height = 10,
-        relative = 'editor',
-        row = 10,
-        col = 10,
-        footer = { { 'test' } },
-        border = 'single',
-      })
-      eq(
-        'title/footer cannot be an empty array',
-        pcall_err(api.nvim_win_set_config, win, { footer = {} })
-      )
-      command('redraw!')
-      assert_alive()
-    end)
-  end)
-
-  describe('set_config', function()
-    it('no crash with invalid title', function()
-      local win = api.nvim_open_win(0, true, {
-        width = 10,
-        height = 10,
-        relative = 'editor',
-        row = 10,
-        col = 10,
-        title = { { 'test' } },
-        border = 'single',
-      })
       eq(
         'title/footer cannot be an empty array',
         pcall_err(api.nvim_win_set_config, win, { title = {} })
@@ -2863,11 +2875,60 @@ describe('API/win', function()
         border = 'single',
       })
       eq(
+        'title/footer must be string or array',
+        pcall_err(api.nvim_win_set_config, win, { footer = 0 })
+      )
+      command('redraw!')
+      assert_alive()
+      eq(
         'title/footer cannot be an empty array',
         pcall_err(api.nvim_win_set_config, win, { footer = {} })
       )
       command('redraw!')
       assert_alive()
+    end)
+
+    describe('no crash or memory leak', function()
+      local win
+
+      before_each(function()
+        win = api.nvim_open_win(0, false, {
+          relative = 'editor',
+          row = 10,
+          col = 10,
+          height = 10,
+          width = 10,
+          border = 'single',
+          title = { { 'OLD_TITLE' } },
+          footer = { { 'OLD_FOOTER' } },
+        })
+      end)
+
+      it('with valid title and invalid footer', function()
+        eq(
+          'title/footer must be string or array',
+          pcall_err(api.nvim_win_set_config, win, {
+            title = { { 'NEW_TITLE' } },
+            footer = 0,
+          })
+        )
+        command('redraw!')
+        assert_alive()
+        eq({ { 'OLD_TITLE' } }, api.nvim_win_get_config(win).title)
+      end)
+
+      it('with invalid title and valid footer', function()
+        eq(
+          'title/footer must be string or array',
+          pcall_err(api.nvim_win_set_config, win, {
+            title = 0,
+            footer = { { 'NEW_FOOTER' } },
+          })
+        )
+        command('redraw!')
+        assert_alive()
+        eq({ { 'OLD_FOOTER' } }, api.nvim_win_get_config(win).footer)
+      end)
     end)
   end)
 end)
