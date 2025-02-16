@@ -733,6 +733,12 @@ M.cmds = {
     func = 'ex_delfunction',
   },
   {
+    command = 'detach',
+    flags = bit.bor(BANG, FILES, CMDARG, ARGOPT, TRLBAR, CMDWIN, LOCK_OK),
+    addr_type = 'ADDR_NONE',
+    func = 'ex_detach',
+  },
+  {
     command = 'display',
     flags = bit.bor(EXTRA, NOTRLCOM, TRLBAR, SBOXOK, CMDWIN, LOCK_OK),
     addr_type = 'ADDR_NONE',
@@ -1945,6 +1951,12 @@ M.cmds = {
     flags = bit.bor(BANG, TRLBAR, SBOXOK, CMDWIN, LOCK_OK),
     addr_type = 'ADDR_NONE',
     func = 'ex_packloadall',
+  },
+  {
+    command = 'pbuffer',
+    flags = bit.bor(BANG, RANGE, BUFNAME, BUFUNL, COUNT, EXTRA, CMDARG, TRLBAR),
+    addr_type = 'ADDR_BUFFERS',
+    func = 'ex_pbuffer',
   },
   {
     command = 'pclose',

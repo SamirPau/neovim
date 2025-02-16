@@ -42,10 +42,10 @@ Developer guidelines
   make distclean
   make  # Nvim build system uses ninja automatically, if available.
   ```
-- Install `ccache` for faster rebuilds of Nvim. Nvim will use it automatically
-  if it's found. To disable caching use:
+- Install `ccache` or `sccache` for faster rebuilds of Nvim. Nvim will use one
+  of these automatically if it's found. To disable caching use:
   ```bash
-  CCACHE_DISABLE=true make
+  cmake -B build -D CACHE_PRG=OFF
   ```
 
 Pull requests (PRs)
@@ -83,7 +83,7 @@ a comment.
 ### Commit messages
 
 Follow the [conventional commits guidelines][conventional_commits] to *make reviews easier* and to make
-the VCS/git logs more valuable. The structure of a commit message is:
+the VCS/git logs more valuable (try `make lintcommit`). The structure of a commit message is:
 
     type(scope): subject
 
@@ -114,11 +114,6 @@ the VCS/git logs more valuable. The structure of a commit message is:
   BREAKING CHANGE: refactor to use Python 3 features since Python 2 is no longer supported.
   ```
 
-### News
-
-High level release notes are maintained in [news.txt](runtime/doc/news.txt). A PR is not required to add a news item
-but is generally recommended.
-
 ### Automated builds (CI)
 
 Each pull request must pass the automated builds on [Cirrus CI] and [GitHub Actions].
@@ -134,7 +129,7 @@ Each pull request must pass the automated builds on [Cirrus CI] and [GitHub Acti
   passes various linter checks.
 - CI for FreeBSD runs on [Cirrus CI].
 - To see CI results faster in your PR, you can temporarily set `TEST_FILE` in
-  [test.yml](https://github.com/neovim/neovim/blob/e35b9020b16985eee26e942f9a3f6b045bc3809b/.github/workflows/test.yml#L29).
+  [test.yml](https://github.com/neovim/neovim/blob/ad8e0cfc1dfd937c2577dc032e524c799a772693/.github/workflows/test.yml#L26).
 
 ### Coverity
 

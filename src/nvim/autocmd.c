@@ -15,6 +15,7 @@
 #include "nvim/charset.h"
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/cursor.h"
+#include "nvim/errors.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/userfunc.h"
@@ -29,8 +30,8 @@
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
+#include "nvim/grid_defs.h"
 #include "nvim/hashtab.h"
-#include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/insexpand.h"
 #include "nvim/lua/executor.h"
@@ -41,7 +42,6 @@
 #include "nvim/option.h"
 #include "nvim/option_defs.h"
 #include "nvim/option_vars.h"
-#include "nvim/optionstr.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
 #include "nvim/os/os_defs.h"
@@ -74,7 +74,6 @@ static const char e_autocommand_nesting_too_deep[]
 // Naming Conventions:
 //  - general autocmd behavior start with au_
 //  - AutoCmd start with aucmd_
-//  - Autocmd.exec stat with aucmd_exec
 //  - AutoPat start with aupat_
 //  - Groups start with augroup_
 //  - Events start with event_
@@ -219,14 +218,14 @@ static void au_show_for_event(int group, event_T event, const char *pat)
         // show the group name, if it's not the default group
         if (ac->pat->group != AUGROUP_DEFAULT) {
           if (last_group_name == NULL) {
-            msg_puts_attr(get_deleted_augroup(), HL_ATTR(HLF_E));
+            msg_puts_hl(get_deleted_augroup(), HLF_E, false);
           } else {
-            msg_puts_attr(last_group_name, HL_ATTR(HLF_T));
+            msg_puts_hl(last_group_name, HLF_T, false);
           }
           msg_puts("  ");
         }
         // show the event name
-        msg_puts_attr(event_nr2name(event), HL_ATTR(HLF_T));
+        msg_puts_hl(event_nr2name(event), HLF_T, false);
       }
 
       // Show pattern only if it changed.
@@ -239,7 +238,7 @@ static void au_show_for_event(int group, event_T event, const char *pat)
         }
 
         msg_col = 4;
-        msg_outtrans(ac->pat->pat, 0);
+        msg_outtrans(ac->pat->pat, 0, false);
       }
 
       if (got_int) {
@@ -254,24 +253,24 @@ static void au_show_for_event(int group, event_T event, const char *pat)
         return;
       }
 
-      char *exec_to_string = aucmd_exec_to_string(ac, ac->exec);
+      char *handler_str = aucmd_handler_to_string(ac);
       if (ac->desc != NULL) {
         size_t msglen = 100;
         char *msg = xmallocz(msglen);
-        if (ac->exec.type == CALLABLE_CB) {
-          msg_puts_attr(exec_to_string, HL_ATTR(HLF_8));
-          snprintf(msg, msglen, " [%s]", ac->desc);
+        if (ac->handler_cmd) {
+          snprintf(msg, msglen, "%s [%s]", handler_str, ac->desc);
         } else {
-          snprintf(msg, msglen, "%s [%s]", exec_to_string, ac->desc);
+          msg_puts_hl(handler_str, HLF_8, false);
+          snprintf(msg, msglen, " [%s]", ac->desc);
         }
-        msg_outtrans(msg, 0);
+        msg_outtrans(msg, 0, false);
         XFREE_CLEAR(msg);
-      } else if (ac->exec.type == CALLABLE_CB) {
-        msg_puts_attr(exec_to_string, HL_ATTR(HLF_8));
+      } else if (ac->handler_cmd) {
+        msg_outtrans(handler_str, 0, false);
       } else {
-        msg_outtrans(exec_to_string, 0);
+        msg_puts_hl(handler_str, HLF_8, false);
       }
-      XFREE_CLEAR(exec_to_string);
+      XFREE_CLEAR(handler_str);
       if (p_verbose > 0) {
         last_set_msg(ac->script_ctx);
       }
@@ -303,7 +302,11 @@ static void aucmd_del(AutoCmd *ac)
     xfree(ac->pat);
   }
   ac->pat = NULL;
-  aucmd_exec_free(&ac->exec);
+  if (ac->handler_cmd) {
+    XFREE_CLEAR(ac->handler_cmd);
+  } else {
+    callback_free(&ac->handler_fn);
+  }
   XFREE_CLEAR(ac->desc);
 
   au_need_clean = true;
@@ -631,7 +634,7 @@ event_T event_name2nr(const char *start, char **end)
   if (event_names[i].name == NULL) {
     return NUM_EVENTS;
   }
-  return event_names[i].event;
+  return (event_T)abs(event_names[i].event);
 }
 
 /// Return the event number for event name "str".
@@ -640,7 +643,7 @@ event_T event_name2nr_str(String str)
 {
   for (int i = 0; event_names[i].name != NULL; i++) {
     if (str.size == event_names[i].len && STRNICMP(str.data, event_names[i].name, str.size) == 0) {
-      return event_names[i].event;
+      return (event_T)abs(event_names[i].event);
     }
   }
   return NUM_EVENTS;
@@ -655,25 +658,23 @@ const char *event_nr2name(event_T event)
   FUNC_ATTR_NONNULL_RET FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_CONST
 {
   for (int i = 0; event_names[i].name != NULL; i++) {
-    if (event_names[i].event == event) {
+    if ((event_T)abs(event_names[i].event) == event) {
       return event_names[i].name;
     }
   }
   return "Unknown";
 }
 
-/// Return true if "event" is included in 'eventignore'.
+/// Return true if "event" is included in 'eventignore(win)'.
 ///
 /// @param event event to check
-static bool event_ignored(event_T event)
+bool event_ignored(event_T event, char *ei)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
-  char *p = p_ei;
-
-  while (*p != NUL) {
-    if (STRNICMP(p, "all", 3) == 0 && (p[3] == NUL || p[3] == ',')) {
+  while (*ei != NUL) {
+    if (STRNICMP(ei, "all", 3) == 0 && (ei[3] == NUL || ei[3] == ',')) {
       return true;
-    } else if (event_name2nr(p, &p) == event) {
+    } else if (event_name2nr(ei, &ei) == event) {
       return true;
     }
   }
@@ -681,19 +682,23 @@ static bool event_ignored(event_T event)
   return false;
 }
 
-// Return OK when the contents of p_ei is valid, FAIL otherwise.
-int check_ei(void)
+/// Return OK when the contents of 'eventignore' or 'eventignorewin' is valid,
+/// FAIL otherwise.
+int check_ei(char *ei)
 {
-  char *p = p_ei;
+  bool win = ei != p_ei;
 
-  while (*p) {
-    if (STRNICMP(p, "all", 3) == 0 && (p[3] == NUL || p[3] == ',')) {
-      p += 3;
-      if (*p == ',') {
-        p++;
+  while (*ei) {
+    if (STRNICMP(ei, "all", 3) == 0 && (ei[3] == NUL || ei[3] == ',')) {
+      ei += 3;
+      if (*ei == ',') {
+        ei++;
       }
-    } else if (event_name2nr(p, &p) == NUM_EVENTS) {
-      return FAIL;
+    } else {
+      event_T event = event_name2nr(ei, &ei);
+      if (event == NUM_EVENTS || (win && event_names[event].event > 0)) {
+        return FAIL;
+      }
     }
   }
 
@@ -710,7 +715,7 @@ char *au_event_disable(char *what)
   if (*what == ',' && *p_ei == NUL) {
     STRCPY(new_ei, what + 1);
   } else {
-    STRCAT(new_ei, what);
+    strcat(new_ei, what);
   }
   set_option_direct(kOptEventignore, CSTR_AS_OPTVAL(new_ei), 0, SID_NONE);
   xfree(new_ei);
@@ -899,8 +904,8 @@ void do_all_autocmd_events(const char *pat, bool once, int nested, char *cmd, bo
 // If *cmd == NUL: show entries.
 // If forceit == true: delete entries.
 // If group is not AUGROUP_ALL: only use this group.
-int do_autocmd_event(event_T event, const char *pat, bool once, int nested, char *cmd, bool del,
-                     int group)
+int do_autocmd_event(event_T event, const char *pat, bool once, int nested, const char *cmd,
+                     bool del, int group)
   FUNC_ATTR_NONNULL_ALL
 {
   // Cannot be used to show all patterns. See au_show_for_event or au_show_for_all_events
@@ -958,10 +963,8 @@ int do_autocmd_event(event_T event, const char *pat, bool once, int nested, char
     }
 
     if (is_adding_cmd) {
-      AucmdExecutable exec = AUCMD_EXECUTABLE_INIT;
-      exec.type = CALLABLE_EX;
-      exec.callable.cmd = cmd;
-      autocmd_register(0, event, pat, patlen, group, once, nested, NULL, exec);
+      Callback handler_fn = CALLBACK_INIT;
+      autocmd_register(0, event, pat, patlen, group, once, nested, NULL, cmd, &handler_fn);
     }
 
     pat = aucmd_next_pattern(pat, (size_t)patlen);
@@ -972,8 +975,13 @@ int do_autocmd_event(event_T event, const char *pat, bool once, int nested, char
   return OK;
 }
 
+/// Registers an autocmd. The handler may be a Ex command or callback function, decided by
+/// the `handler_cmd` or `handler_fn` args.
+///
+/// @param handler_cmd Handler Ex command, or NULL if handler is a function (`handler_fn`).
+/// @param handler_fn Handler function, ignored if `handler_cmd` is not NULL.
 int autocmd_register(int64_t id, event_T event, const char *pat, int patlen, int group, bool once,
-                     bool nested, char *desc, AucmdExecutable aucmd)
+                     bool nested, char *desc, const char *handler_cmd, Callback *handler_fn)
 {
   // 0 is not a valid group.
   assert(group != 0);
@@ -1081,7 +1089,12 @@ int autocmd_register(int64_t id, event_T event, const char *pat, int patlen, int
   AutoCmd *ac = kv_pushp(autocmds[(int)event]);
   ac->pat = ap;
   ac->id = id;
-  ac->exec = aucmd_exec_copy(aucmd);
+  if (handler_cmd) {
+    ac->handler_cmd = xstrdup(handler_cmd);
+  } else {
+    ac->handler_cmd = NULL;
+    callback_copy(&ac->handler_fn, handler_fn);
+  }
   ac->script_ctx = current_sctx;
   ac->script_ctx.sc_lnum += SOURCING_LNUM;
   nlua_set_sctx(&ac->script_ctx);
@@ -1620,7 +1633,24 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
   }
 
   // Ignore events in 'eventignore'.
-  if (event_ignored(event)) {
+  if (event_ignored(event, p_ei)) {
+    goto BYPASS_AU;
+  }
+
+  bool win_ignore = false;
+  // If event is allowed in 'eventignorewin', check if curwin or all windows
+  // into "buf" are ignoring the event.
+  if (buf == curbuf && event_names[event].event <= 0) {
+    win_ignore = event_ignored(event, curwin->w_p_eiw);
+  } else if (buf != NULL && event_names[event].event <= 0) {
+    for (size_t i = 0; i < kv_size(buf->b_wininfo); i++) {
+      WinInfo *wip = kv_A(buf->b_wininfo, i);
+      if (wip->wi_win != NULL && wip->wi_win->w_buffer == buf) {
+        win_ignore = event_ignored(event, wip->wi_win->w_p_eiw);
+      }
+    }
+  }
+  if (win_ignore) {
     goto BYPASS_AU;
   }
 
@@ -1665,7 +1695,9 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
   } else {
     autocmd_fname = fname_io;
   }
+  char *afile_orig = NULL;  ///< Unexpanded <afile>
   if (autocmd_fname != NULL) {
+    afile_orig = xstrdup(autocmd_fname);
     // Allocate MAXPATHL for when eval_vars() resolves the fullpath.
     autocmd_fname = xstrnsave(autocmd_fname, MAXPATHL);
   }
@@ -1699,19 +1731,33 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
   } else {
     sfname = xstrdup(fname);
     // Don't try expanding the following events.
-    if (event == EVENT_CMDLINECHANGED || event == EVENT_CMDLINEENTER
-        || event == EVENT_CMDLINELEAVE || event == EVENT_CMDUNDEFINED
-        || event == EVENT_CMDWINENTER || event == EVENT_CMDWINLEAVE
-        || event == EVENT_COLORSCHEME || event == EVENT_COLORSCHEMEPRE
-        || event == EVENT_DIRCHANGED || event == EVENT_DIRCHANGEDPRE
-        || event == EVENT_FILETYPE || event == EVENT_FUNCUNDEFINED
-        || event == EVENT_MENUPOPUP || event == EVENT_MODECHANGED
-        || event == EVENT_OPTIONSET || event == EVENT_QUICKFIXCMDPOST
-        || event == EVENT_QUICKFIXCMDPRE || event == EVENT_REMOTEREPLY
-        || event == EVENT_SIGNAL || event == EVENT_SPELLFILEMISSING
-        || event == EVENT_SYNTAX || event == EVENT_TABCLOSED
-        || event == EVENT_USER || event == EVENT_WINCLOSED
-        || event == EVENT_WINRESIZED || event == EVENT_WINSCROLLED) {
+    if (event == EVENT_CMDLINECHANGED
+        || event == EVENT_CMDLINEENTER
+        || event == EVENT_CMDLINELEAVE
+        || event == EVENT_CMDUNDEFINED
+        || event == EVENT_CURSORMOVEDC
+        || event == EVENT_CMDWINENTER
+        || event == EVENT_CMDWINLEAVE
+        || event == EVENT_COLORSCHEME
+        || event == EVENT_COLORSCHEMEPRE
+        || event == EVENT_DIRCHANGED
+        || event == EVENT_DIRCHANGEDPRE
+        || event == EVENT_FILETYPE
+        || event == EVENT_FUNCUNDEFINED
+        || event == EVENT_MENUPOPUP
+        || event == EVENT_MODECHANGED
+        || event == EVENT_OPTIONSET
+        || event == EVENT_QUICKFIXCMDPOST
+        || event == EVENT_QUICKFIXCMDPRE
+        || event == EVENT_REMOTEREPLY
+        || event == EVENT_SIGNAL
+        || event == EVENT_SPELLFILEMISSING
+        || event == EVENT_SYNTAX
+        || event == EVENT_TABCLOSED
+        || event == EVENT_USER
+        || event == EVENT_WINCLOSED
+        || event == EVENT_WINRESIZED
+        || event == EVENT_WINSCROLLED) {
       fname = xstrdup(fname);
       autocmd_fname_full = true;  // don't expand it later
     } else {
@@ -1783,6 +1829,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
     // save vector size, to avoid an endless loop when more patterns
     // are added when executing autocommands
     .ausize = kv_size(autocmds[(int)event]),
+    .afile_orig = afile_orig,
     .fname = fname,
     .sfname = sfname,
     .tail = tail,
@@ -1850,6 +1897,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
   autocmd_nested = save_autocmd_nested;
   xfree(SOURCING_NAME);
   estack_pop();
+  xfree(afile_orig);
   xfree(autocmd_fname);
   autocmd_fname = save_autocmd_fname;
   autocmd_fname_full = save_autocmd_fname_full;
@@ -2007,15 +2055,16 @@ static void aucmd_next(AutoPatCmd *apc)
   apc->auidx = SIZE_MAX;
 }
 
-static bool call_autocmd_callback(const AutoCmd *ac, const AutoPatCmd *apc)
+/// Executes an autocmd callback function (as opposed to an Ex command).
+static bool au_callback(const AutoCmd *ac, const AutoPatCmd *apc)
 {
-  Callback callback = ac->exec.callable.cb;
+  Callback callback = ac->handler_fn;
   if (callback.type == kCallbackLua) {
     MAXSIZE_TEMP_DICT(data, 7);
     PUT_C(data, "id", INTEGER_OBJ(ac->id));
     PUT_C(data, "event", CSTR_AS_OBJ(event_nr2name(apc->event)));
+    PUT_C(data, "file", CSTR_AS_OBJ(apc->afile_orig));
     PUT_C(data, "match", CSTR_AS_OBJ(autocmd_match));
-    PUT_C(data, "file", CSTR_AS_OBJ(autocmd_fname));
     PUT_C(data, "buf", INTEGER_OBJ(autocmd_bufnr));
 
     if (apc->data) {
@@ -2037,7 +2086,7 @@ static bool call_autocmd_callback(const AutoCmd *ac, const AutoPatCmd *apc)
     }
 
     MAXSIZE_TEMP_ARRAY(args, 1);
-    ADD_C(args, DICTIONARY_OBJ(data));
+    ADD_C(args, DICT_OBJ(data));
 
     Object result = nlua_call_ref(callback.data.luaref, NULL, args, kRetNilBool, NULL, NULL);
     return LUARET_TRUTHY(result);
@@ -2074,10 +2123,10 @@ char *getnextac(int c, void *cookie, int indent, bool do_concat)
 
   if (p_verbose >= 9) {
     verbose_enter_scroll();
-    char *exec_to_string = aucmd_exec_to_string(ac, ac->exec);
-    smsg(0, _("autocommand %s"), exec_to_string);
+    char *handler_str = aucmd_handler_to_string(ac);
+    smsg(0, _("autocommand %s"), handler_str);
     msg_puts("\n");  // don't overwrite this either
-    XFREE_CLEAR(exec_to_string);
+    XFREE_CLEAR(handler_str);
     verbose_leave_scroll();
   }
 
@@ -2088,16 +2137,22 @@ char *getnextac(int c, void *cookie, int indent, bool do_concat)
   apc->script_ctx = current_sctx;
 
   char *retval;
-  if (ac->exec.type == CALLABLE_CB) {
-    // Can potentially reallocate kvec_t data and invalidate the ac pointer
-    if (call_autocmd_callback(ac, apc)) {
-      // If an autocommand callback returns true, delete the autocommand
-      oneshot = true;
+  if (ac->handler_cmd) {
+    retval = xstrdup(ac->handler_cmd);
+  } else {
+    AutoCmd ac_copy = *ac;
+    // Mark oneshot handler as "removed" now, to prevent recursion by e.g. `:doautocmd`. #25526
+    ac->pat = oneshot ? NULL : ac->pat;
+    // May reallocate `acs` kvec_t data and invalidate the `ac` pointer.
+    bool rv = au_callback(&ac_copy, apc);
+    if (oneshot) {
+      // Restore `pat`. Use `acs` because `ac` may have been invalidated by the callback.
+      kv_A(*acs, apc->auidx).pat = ac_copy.pat;
     }
+    // If an autocommand callback returns true, delete the autocommand
+    oneshot = oneshot || rv;
 
-    // TODO(tjdevries):
-    //
-    // Major Hack Alert:
+    // HACK(tjdevries):
     //  We just return "not-null" and continue going.
     //  This would be a good candidate for a refactor. You would need to refactor:
     //      1. do_cmdline to accept something besides a string
@@ -2106,8 +2161,6 @@ char *getnextac(int c, void *cookie, int indent, bool do_concat)
     //      and instead we loop over all the matches and just execute one-by-one.
     //          However, my expectation would be that could be expensive.
     retval = xcalloc(1, 1);
-  } else {
-    retval = xstrdup(ac->exec.callable.cmd);
   }
 
   // Remove one-shot ("once") autocmd in anticipation of its execution.
@@ -2245,9 +2298,21 @@ char *expand_get_event_name(expand_T *xp, int idx)
 
 /// Function given to ExpandGeneric() to obtain the list of event names. Don't
 /// include groups.
-char *get_event_name_no_group(expand_T *xp FUNC_ATTR_UNUSED, int idx)
+char *get_event_name_no_group(expand_T *xp FUNC_ATTR_UNUSED, int idx, bool win)
 {
-  return event_names[idx].name;
+  if (!win) {
+    return event_names[idx].name;
+  }
+
+  // Need to check subset of allowed values for 'eventignorewin'.
+  int j = 0;
+  for (int i = 0; i < NUM_EVENTS; i++) {
+    j += event_names[i].event <= 0;
+    if (j == idx + 1) {
+      return event_names[i].name;
+    }
+  }
+  return NULL;
 }
 
 /// Check whether given autocommand is supported
@@ -2426,60 +2491,14 @@ bool autocmd_delete_id(int64_t id)
   return success;
 }
 
-// ===========================================================================
-//  AucmdExecutable Functions
-// ===========================================================================
-
-/// Generate a string description for the command/callback of an autocmd
-char *aucmd_exec_to_string(AutoCmd *ac, AucmdExecutable acc)
+/// Gets an (allocated) string representation of an autocmd command/callback.
+char *aucmd_handler_to_string(AutoCmd *ac)
   FUNC_ATTR_PURE
 {
-  switch (acc.type) {
-  case CALLABLE_EX:
-    return xstrdup(acc.callable.cmd);
-  case CALLABLE_CB:
-    return callback_to_string(&acc.callable.cb, NULL);
-  case CALLABLE_NONE:
-    return "This is not possible";
+  if (ac->handler_cmd) {
+    return xstrdup(ac->handler_cmd);
   }
-
-  abort();
-}
-
-void aucmd_exec_free(AucmdExecutable *acc)
-{
-  switch (acc->type) {
-  case CALLABLE_EX:
-    XFREE_CLEAR(acc->callable.cmd);
-    break;
-  case CALLABLE_CB:
-    callback_free(&acc->callable.cb);
-    break;
-  case CALLABLE_NONE:
-    return;
-  }
-
-  acc->type = CALLABLE_NONE;
-}
-
-AucmdExecutable aucmd_exec_copy(AucmdExecutable src)
-{
-  AucmdExecutable dest = AUCMD_EXECUTABLE_INIT;
-
-  switch (src.type) {
-  case CALLABLE_EX:
-    dest.type = CALLABLE_EX;
-    dest.callable.cmd = xstrdup(src.callable.cmd);
-    return dest;
-  case CALLABLE_CB:
-    dest.type = CALLABLE_CB;
-    callback_copy(&dest.callable.cb, &src.callable.cb);
-    return dest;
-  case CALLABLE_NONE:
-    return dest;
-  }
-
-  abort();
+  return callback_to_string(&ac->handler_fn, NULL);
 }
 
 bool au_event_is_empty(event_T event)

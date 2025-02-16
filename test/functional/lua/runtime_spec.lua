@@ -21,7 +21,9 @@ describe('runtime:', function()
     exec('set rtp+=' .. plug_dir)
     exec([[
       set shell=doesnotexist
-      set completeslash=slash
+      if exists('+completeslash')
+        set completeslash=slash
+      endif
       set isfname+=(,)
     ]])
   end)
@@ -400,5 +402,13 @@ describe('runtime:', function()
       exec('set spelllang=Xtest')
       eq('ABab', eval('g:seq'))
     end)
+  end)
+
+  it('cpp ftplugin loads c ftplugin #29053', function()
+    eq('', eval('&commentstring'))
+    eq('', eval('&omnifunc'))
+    exec('edit file.cpp')
+    eq('// %s', eval('&commentstring'))
+    eq('ccomplete#Complete', eval('&omnifunc'))
   end)
 end)

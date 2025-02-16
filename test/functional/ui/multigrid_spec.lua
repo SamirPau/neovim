@@ -16,8 +16,7 @@ describe('ext_multigrid', function()
 
   before_each(function()
     clear{args_rm={'--headless'}, args={'--cmd', 'set laststatus=2'}}
-    screen = Screen.new(53,14)
-    screen:attach({ext_multigrid=true})
+    screen = Screen.new(53,14, {ext_multigrid=true})
     screen:set_default_attr_ids({
       [1] = {bold = true, foreground = Screen.colors.Blue1},
       [2] = {foreground = Screen.colors.Magenta},
@@ -741,6 +740,75 @@ describe('ext_multigrid', function()
         [4] = {-1, "SW", 1, 13, 5, false, 250};
       }}
     end)
+
+    it('half-page scrolling stops at end of buffer', function()
+      command('set number')
+      insert(('foobar\n'):rep(100))
+      feed('7<C-Y>')
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          {19: 75 }foobar                                                  |
+          {19: 76 }foobar                                                  |
+          {19: 77 }foobar                                                  |
+          {19: 78 }foobar                                                  |
+          {19: 79 }foobar                                                  |
+          {19: 80 }foobar                                                  |
+          {19: 81 }foobar                                                  |
+          {19: 82 }foobar                                                  |
+          {19: 83 }foobar                                                  |
+          {19: 84 }foobar                                                  |
+          {19: 85 }foobar                                                  |
+          {19: 86 }foobar                                                  |
+          {19: 87 }foobar                                                  |
+          {19: 88 }foobar                                                  |
+          {19: 89 }foobar                                                  |
+          {19: 90 }foobar                                                  |
+          {19: 91 }foobar                                                  |
+          {19: 92 }foobar                                                  |
+          {19: 93 }foobar                                                  |
+          {19: 94 }^foobar                                                  |
+        ## grid 3
+                                                               |
+        ]],
+      })
+      feed('<C-D>')
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          {19: 82 }foobar                                                  |
+          {19: 83 }foobar                                                  |
+          {19: 84 }foobar                                                  |
+          {19: 85 }foobar                                                  |
+          {19: 86 }foobar                                                  |
+          {19: 87 }foobar                                                  |
+          {19: 88 }foobar                                                  |
+          {19: 89 }foobar                                                  |
+          {19: 90 }foobar                                                  |
+          {19: 91 }foobar                                                  |
+          {19: 92 }foobar                                                  |
+          {19: 93 }foobar                                                  |
+          {19: 94 }foobar                                                  |
+          {19: 95 }foobar                                                  |
+          {19: 96 }foobar                                                  |
+          {19: 97 }foobar                                                  |
+          {19: 98 }foobar                                                  |
+          {19: 99 }foobar                                                  |
+          {19:100 }foobar                                                  |
+          {19:101 }^                                                        |
+        ## grid 3
+                                                               |
+        ]],
+      })
+    end)
   end)
 
   it('multiline messages scroll over windows', function()
@@ -1026,6 +1094,7 @@ describe('ext_multigrid', function()
   end)
 
   it('supports mouse', function()
+    command('autocmd! nvim.popupmenu') -- Delete the default MenuPopup event handler.
     insert('some text\nto be clicked')
     screen:expect{grid=[[
     ## grid 1
@@ -2338,6 +2407,22 @@ describe('ext_multigrid', function()
 
   it('with winbar', function()
     command('split')
+    local win_pos ={
+      [2] = {
+        height = 5,
+        startcol = 0,
+        startrow = 7,
+        width = 53,
+        win = 1000
+      },
+      [4] = {
+        height = 6,
+        startcol = 0,
+        startrow = 0,
+        width = 53,
+        win = 1001
+      }
+    }
     screen:expect{grid=[[
     ## grid 1
       [4:-----------------------------------------------------]|*6
@@ -2359,15 +2444,7 @@ describe('ext_multigrid', function()
     }, win_viewport_margins={
       [2] = {win = 1000, top = 0, bottom = 0, left = 0, right = 0};
       [4] = {win = 1001, top = 0, bottom = 0, left = 0, right = 0};
-    }}
-
-    -- XXX: hack to get notifications. Could use next_msg() also.
-    local orig_handle_win_pos = screen._handle_win_pos
-    local win_pos = {}
-    function screen._handle_win_pos(self, grid, win, startrow, startcol, width, height)
-      table.insert(win_pos, {grid, win, startrow, startcol, width, height})
-      orig_handle_win_pos(self, grid, win, startrow, startcol, width, height)
-    end
+    }, win_pos = win_pos }
 
     command('setlocal winbar=very%=bar')
     screen:expect{grid=[[
@@ -2392,8 +2469,7 @@ describe('ext_multigrid', function()
     }, win_viewport_margins={
       [2] = {win = 1000, top = 0, bottom = 0, left = 0, right = 0};
       [4] = {win = 1001, top = 1, bottom = 0, left = 0, right = 0};
-    }}
-    eq({}, win_pos)
+    }, win_pos = win_pos }
 
     command('setlocal winbar=')
     screen:expect{grid=[[
@@ -2417,8 +2493,7 @@ describe('ext_multigrid', function()
     }, win_viewport_margins={
       [2] = {win = 1000, top = 0, bottom = 0, left = 0, right = 0};
       [4] = {win = 1001, top = 0, bottom = 0, left = 0, right = 0};
-    }}
-    eq({}, win_pos)
+    }, win_pos = win_pos }
   end)
 
   it('with winbar dragging statusline with mouse works correctly', function()
@@ -2528,5 +2603,258 @@ describe('ext_multigrid', function()
       {1:~                                                    }|*2
     ]])
     eq(1, api.nvim_get_option_value('cmdheight', {}))
+  end)
+
+  describe('centered cursorline', function()
+    before_each(function()
+      -- Force a centered cursorline, this caused some redrawing problems described in #30576.
+      -- Most importantly, win_viewport was not received in time, and sum_scroll_delta did not refresh.
+      command('set cursorline scrolloff=9999')
+    end)
+    it('insert line scrolls correctly', function()
+      for i = 1, 11 do
+        insert('line' .. i .. '\n')
+      end
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          line1                                                |
+          line2                                                |
+          line3                                                |
+          line4                                                |
+          line5                                                |
+          line6                                                |
+          line7                                                |
+          line8                                                |
+          line9                                                |
+          line10                                               |
+          line11                                               |
+          {23:^                                                     }|
+        ## grid 3
+                                                               |
+        ]], win_viewport={
+        [2] = {win = 1000, topline = 0, botline = 12, curline = 11, curcol = 0, linecount = 12, sum_scroll_delta = 0};
+      }, win_viewport_margins={
+        [2] = {
+          bottom = 0,
+          left = 0,
+          right = 0,
+          top = 0,
+          win = 1000
+        }
+      }})
+      insert('line12\n')
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          line2                                                |
+          line3                                                |
+          line4                                                |
+          line5                                                |
+          line6                                                |
+          line7                                                |
+          line8                                                |
+          line9                                                |
+          line10                                               |
+          line11                                               |
+          line12                                               |
+          {23:^                                                     }|
+        ## grid 3
+                                                               |
+        ]], win_viewport={
+        [2] = {win = 1000, topline = 1, botline = 13, curline = 12, curcol = 0, linecount = 13, sum_scroll_delta = 1};
+      }, win_viewport_margins={
+        [2] = {
+          bottom = 0,
+          left = 0,
+          right = 0,
+          top = 0,
+          win = 1000
+        }
+      }})
+    end)
+
+    it('got to top scrolls correctly', function()
+      for i = 1, 20 do
+        insert('line' .. i .. '\n')
+      end
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          line10                                               |
+          line11                                               |
+          line12                                               |
+          line13                                               |
+          line14                                               |
+          line15                                               |
+          line16                                               |
+          line17                                               |
+          line18                                               |
+          line19                                               |
+          line20                                               |
+          {23:^                                                     }|
+        ## grid 3
+                                                               |
+        ]], win_viewport={
+        [2] = {win = 1000, topline = 9, botline = 21, curline = 20, curcol = 0, linecount = 21, sum_scroll_delta = 9};
+      }, win_viewport_margins={
+        [2] = {
+          bottom = 0,
+          left = 0,
+          right = 0,
+          top = 0,
+          win = 1000
+        }
+      }})
+      feed('gg')
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          {23:^line1                                                }|
+          line2                                                |
+          line3                                                |
+          line4                                                |
+          line5                                                |
+          line6                                                |
+          line7                                                |
+          line8                                                |
+          line9                                                |
+          line10                                               |
+          line11                                               |
+          line12                                               |
+        ## grid 3
+                                                               |
+        ]], win_viewport={
+        [2] = {win = 1000, topline = 0, botline = 13, curline = 0, curcol = 0, linecount = 21, sum_scroll_delta = 0};
+      }, win_viewport_margins={
+        [2] = {
+          bottom = 0,
+          left = 0,
+          right = 0,
+          top = 0,
+          win = 1000
+        }
+      }})
+    end)
+
+    it('scrolls in the middle', function()
+      for i = 1, 20 do
+        insert('line' .. i .. '\n')
+      end
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          line10                                               |
+          line11                                               |
+          line12                                               |
+          line13                                               |
+          line14                                               |
+          line15                                               |
+          line16                                               |
+          line17                                               |
+          line18                                               |
+          line19                                               |
+          line20                                               |
+          {23:^                                                     }|
+        ## grid 3
+                                                               |
+        ]], win_viewport={
+        [2] = {win = 1000, topline = 9, botline = 21, curline = 20, curcol = 0, linecount = 21, sum_scroll_delta = 9};
+      }, win_viewport_margins={
+        [2] = {
+          bottom = 0,
+          left = 0,
+          right = 0,
+          top = 0,
+          win = 1000
+        }
+      }})
+      feed('M')
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          line10                                               |
+          line11                                               |
+          line12                                               |
+          line13                                               |
+          line14                                               |
+          {23:^line15                                               }|
+          line16                                               |
+          line17                                               |
+          line18                                               |
+          line19                                               |
+          line20                                               |
+                                                               |
+        ## grid 3
+                                                               |
+        ]], win_viewport={
+        [2] = {win = 1000, topline = 9, botline = 21, curline = 14, curcol = 0, linecount = 21, sum_scroll_delta = 9};
+      }, win_viewport_margins={
+        [2] = {
+          bottom = 0,
+          left = 0,
+          right = 0,
+          top = 0,
+          win = 1000
+        }
+      }})
+      feed('k')
+      screen:expect({
+        grid = [[
+        ## grid 1
+          [2:-----------------------------------------------------]|*12
+          {11:[No Name] [+]                                        }|
+          [3:-----------------------------------------------------]|
+        ## grid 2
+          line9                                                |
+          line10                                               |
+          line11                                               |
+          line12                                               |
+          line13                                               |
+          {23:^line14                                               }|
+          line15                                               |
+          line16                                               |
+          line17                                               |
+          line18                                               |
+          line19                                               |
+          line20                                               |
+        ## grid 3
+                                                               |
+        ]], win_viewport={
+        [2] = {win = 1000, topline = 8, botline = 21, curline = 13, curcol = 0, linecount = 21, sum_scroll_delta = 8};
+      }, win_viewport_margins={
+        [2] = {
+          bottom = 0,
+          left = 0,
+          right = 0,
+          top = 0,
+          win = 1000
+        }
+      }})
+    end)
   end)
 end)

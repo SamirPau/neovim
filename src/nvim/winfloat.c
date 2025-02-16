@@ -11,15 +11,18 @@
 #include "nvim/autocmd.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/drawscreen.h"
+#include "nvim/errors.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
 #include "nvim/grid_defs.h"
 #include "nvim/macros_defs.h"
 #include "nvim/memory.h"
+#include "nvim/message.h"
 #include "nvim/mouse.h"
 #include "nvim/move.h"
 #include "nvim/option.h"
 #include "nvim/option_defs.h"
+#include "nvim/option_vars.h"
 #include "nvim/optionstr.h"
 #include "nvim/pos_defs.h"
 #include "nvim/strings.h"
@@ -56,13 +59,19 @@ win_T *win_new_float(win_T *wp, bool last, WinConfig fconfig, Error *err)
       if (!tp) {
         return NULL;
       }
-      tp_last = tp->tp_lastwin;
+      tp_last = tp == curtab ? lastwin : tp->tp_lastwin;
       while (tp_last->w_floating && tp_last->w_prev) {
         tp_last = tp_last->w_prev;
       }
     }
     wp = win_alloc(tp_last, false);
     win_init(wp, curwin, 0);
+    if (wp->w_p_wbr != NULL && fconfig.height == 1) {
+      if (wp->w_p_wbr != empty_string_option) {
+        free_string_option(wp->w_p_wbr);
+      }
+      wp->w_p_wbr = empty_string_option;
+    }
   } else {
     assert(!last);
     assert(!wp->w_floating);
@@ -134,7 +143,7 @@ void win_set_minimal_style(win_T *wp)
                    ? xstrdup("EndOfBuffer:")
                    : concat_str(old, ",EndOfBuffer:"));
   free_string_option(old);
-  parse_winhl_opt(wp);
+  parse_winhl_opt(NULL, wp);
 
   // signcolumn: use 'auto'
   if (wp->w_p_scl[0] != 'a' || strlen(wp->w_p_scl) >= 8) {
@@ -200,7 +209,7 @@ void win_config_float(win_T *wp, WinConfig fconfig)
                                   wp->w_config.border_hl_ids,
                                   sizeof fconfig.border_hl_ids) != 0);
 
-  wp->w_config = fconfig;
+  merge_win_config(&wp->w_config, fconfig);
 
   bool has_border = wp->w_floating && wp->w_config.border;
   for (int i = 0; i < 4; i++) {
@@ -305,6 +314,15 @@ void win_check_anchored_floats(win_T *win)
   }
 }
 
+void win_float_anchor_laststatus(void)
+{
+  FOR_ALL_WINDOWS_IN_TAB(win, curtab) {
+    if (win->w_config.relative == kFloatRelativeLaststatus) {
+      win->w_pos_changed = true;
+    }
+  }
+}
+
 void win_reconfig_floats(void)
 {
   for (win_T *wp = lastwin; wp && wp->w_floating; wp = wp->w_prev) {
@@ -358,6 +376,21 @@ win_T *win_float_find_altwin(const win_T *win, const tabpage_T *tp)
                                                                           : tp->tp_firstwin;
 }
 
+/// Inline helper function for handling errors and cleanup in win_float_create.
+static inline win_T *handle_error_and_cleanup(win_T *wp, Error *err)
+{
+  if (ERROR_SET(err)) {
+    emsg(err->msg);
+    api_clear_error(err);
+  }
+  if (wp) {
+    win_remove(wp, NULL);
+    win_free(wp, NULL);
+  }
+  unblock_autocmds();
+  return NULL;
+}
+
 /// create a floating preview window.
 ///
 /// @param[in] bool enter floating window.
@@ -371,6 +404,7 @@ win_T *win_float_create(bool enter, bool new_buf)
   config.row = curwin->w_wrow;
   config.relative = kFloatRelativeEditor;
   config.focusable = false;
+  config.mouse = false;
   config.anchor = 0;  // NW
   config.noautocmd = true;
   config.hide = true;
@@ -380,23 +414,25 @@ win_T *win_float_create(bool enter, bool new_buf)
   block_autocmds();
   win_T *wp = win_new_float(NULL, false, config, &err);
   if (!wp) {
-    unblock_autocmds();
-    return NULL;
+    return handle_error_and_cleanup(wp, &err);
   }
 
   if (new_buf) {
     Buffer b = nvim_create_buf(false, true, &err);
     if (!b) {
-      win_remove(wp, NULL);
-      win_free(wp, NULL);
-      unblock_autocmds();
-      return NULL;
+      return handle_error_and_cleanup(wp, &err);
     }
     buf_T *buf = find_buffer_by_handle(b, &err);
+    if (!buf) {
+      return handle_error_and_cleanup(wp, &err);
+    }
     buf->b_p_bl = false;  // unlist
-    set_option_direct_for(kOptBufhidden, STATIC_CSTR_AS_OPTVAL("wipe"), OPT_LOCAL, 0, kOptReqBuf,
-                          buf);
+    set_option_direct_for(kOptBufhidden, STATIC_CSTR_AS_OPTVAL("wipe"), OPT_LOCAL, 0,
+                          kOptScopeBuf, buf);
     win_set_buf(wp, buf, &err);
+    if (ERROR_SET(&err)) {
+      return handle_error_and_cleanup(wp, &err);
+    }
   }
   unblock_autocmds();
   wp->w_p_diff = false;
